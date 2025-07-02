@@ -1,0 +1,506 @@
+import streamlit as st
+import random
+import time
+import json
+import folium
+from streamlit_folium import st_folium
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Set page configuration
+st.set_page_config(
+    page_title="GeoWorkflow Automator",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for styling
+st.markdown("""
+<style>
+    /* Main styling */
+    .stApp {
+        background-color: #f8fafc;
+    }
+    
+    /* Header styling */
+    .header {
+        background-color: #2563EB;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 0 0 10px 10px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* Card styling */
+    .card {
+        background-color: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border-left: 4px solid #2563EB;
+    }
+    
+    .card-gdal {
+        border-left: 4px solid #16A34A;
+    }
+    
+    .card-qgis {
+        border-left: 4px solid #F59E0B;
+    }
+    
+    /* Footer styling */
+    .footer {
+        background-color: #e2e8f0;
+        padding: 1rem;
+        border-radius: 10px;
+        margin-top: 1.5rem;
+        font-size: 0.85rem;
+    }
+    
+    /* Button styling */
+    .stButton>button {
+        background-color: #2563EB;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+    }
+    
+    .stButton>button:hover {
+        background-color: #1d4ed8;
+        color: white;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e2e8f0 !important;
+        border-radius: 8px 8px 0 0 !important;
+        padding: 0.5rem 1rem !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #2563EB !important;
+        color: white !important;
+    }
+    
+    /* Code block styling */
+    .stCodeBlock {
+        border-radius: 8px;
+        padding: 1rem;
+        background-color: #f1f5f9;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header section
+st.markdown("""
+<div class="header">
+    <div style="display:flex; align-items:center; gap:15px;">
+        <h1 style="margin:0; font-size:28px;">🌐 GeoWorkflow Automator</h1>
+        <div style="display:flex; gap:10px; margin-left:auto;">
+            <button style="background:none; border:none; color:white; cursor:pointer;">Docs</button>
+            <button style="background:none; border:none; color:white; cursor:pointer;">Examples</button>
+            <button style="background:none; border:none; color:white; cursor:pointer;">GitHub</button>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Generate sample data for visualization
+def generate_flood_risk_data():
+    # Generate random flood risk data
+    x = np.linspace(0, 10, 100)
+    y = np.linspace(0, 10, 100)
+    X, Y = np.meshgrid(x, y)
+    Z = np.sin(X) * np.cos(Y) * 2 + np.random.rand(*X.shape) * 0.3
+    
+    # Create risk zones
+    risk_zones = np.zeros_like(Z)
+    risk_zones[Z > 1.5] = 3  # High risk
+    risk_zones[(Z > 0.5) & (Z <= 1.5)] = 2  # Medium risk
+    risk_zones[Z <= 0.5] = 1  # Low risk
+    
+    # Create a folium map
+    m = folium.Map(location=[18.96, 72.82], zoom_start=12, tiles='OpenStreetMap')
+    
+    # Add risk areas (simulated)
+    for _ in range(15):
+        lat = 18.96 + random.uniform(-0.1, 0.1)
+        lon = 72.82 + random.uniform(-0.1, 0.1)
+        risk_level = random.choices([1, 2, 3], weights=[0.5, 0.3, 0.2])[0]
+        
+        if risk_level == 1:
+            color = 'green'
+        elif risk_level == 2:
+            color = 'orange'
+        else:
+            color = 'red'
+            
+        folium.CircleMarker(
+            location=[lat, lon],
+            radius=random.randint(5, 15),
+            color=color,
+            fill=True,
+            fill_color=color
+        ).add_to(m)
+    
+    return Z, risk_zones, m
+
+# Initialize session state
+if 'query' not in st.session_state:
+    st.session_state.query = ""
+if 'workflow' not in st.session_state:
+    st.session_state.workflow = {}
+if 'execution_log' not in st.session_state:
+    st.session_state.execution_log = []
+if 'execution_started' not in st.session_state:
+    st.session_state.execution_started = False
+if 'execution_complete' not in st.session_state:
+    st.session_state.execution_complete = False
+if 'flood_data' not in st.session_state:
+    st.session_state.flood_data = generate_flood_risk_data()
+
+# Generate sample workflow
+def generate_workflow(query):
+    """Generate a sample workflow based on query"""
+    return {
+        "priority_path": "gdal_whitebox",
+        "description": f"Flood risk assessment for {query.split('for')[-1].strip()}",
+        "steps": [
+            {
+                "step_id": 1,
+                "tool": "gdal",
+                "operation": "warp",
+                "params": {
+                    "input": "global_dem.tif",
+                    "output": "local_dem.tif",
+                    "outputBounds": [72.8, 18.9, 72.9, 19.0]
+                },
+                "estimated_time": "5s"
+            },
+            {
+                "step_id": 2,
+                "tool": "whitebox",
+                "operation": "fill_depressions",
+                "params": {
+                    "input": "local_dem.tif",
+                    "output": "filled_dem.tif"
+                },
+                "estimated_time": "8s"
+            },
+            {
+                "step_id": 3,
+                "tool": "whitebox",
+                "operation": "flow_accumulation",
+                "params": {
+                    "input": "filled_dem.tif",
+                    "output": "flow_accumulation.tif"
+                },
+                "estimated_time": "12s"
+            },
+            {
+                "step_id": 4,
+                "tool": "gdal",
+                "operation": "calc",
+                "params": {
+                    "input": "flow_accumulation.tif",
+                    "calc": "A>5000?3:(A>2000?2:1)",
+                    "output": "flood_risk.tif"
+                },
+                "estimated_time": "4s"
+            }
+        ],
+        "fallback_trigger": "unsupported_operation"
+    }
+
+# Generate sample reasoning
+def generate_reasoning(query):
+    """Generate sample chain-of-thought reasoning"""
+    location = query.split('for')[-1].strip()
+    return [
+        f"1. 📥 Downloading Digital Elevation Model (DEM) for {location} bounding box (72.8,18.9,72.9,19.0) from Copernicus STAC API",
+        f"2. 🚰 Filling sinks in the DEM to create a hydrologically correct surface using WhiteboxTools",
+        f"3. 🌊 Calculating flow accumulation to identify water flow patterns in {location}",
+        f"4. 🚨 Classifying flood risk areas based on flow accumulation thresholds: >5000 = high risk, >2000 = medium risk",
+        f"5. 🗺️ Generating final flood risk map with visual classification"
+    ]
+
+# Execute workflow steps
+def execute_workflow(workflow):
+    """Simulate workflow execution"""
+    st.session_state.execution_log = []
+    st.session_state.execution_complete = False
+    
+    for step in workflow["steps"]:
+        tool = step["tool"]
+        operation = step["operation"]
+        
+        # Simulate processing time
+        time.sleep(random.uniform(0.5, 2.0))
+        
+        # Create log entry
+        if random.random() > 0.2:  # 80% success rate
+            log_entry = {
+                "timestamp": time.strftime("%H:%M:%S"),
+                "status": "success",
+                "message": f"Step {step['step_id']}: {tool.capitalize()} {operation} completed ({step['estimated_time']})",
+                "icon": "🟢"
+            }
+        else:
+            log_entry = {
+                "timestamp": time.strftime("%H:%M:%S"),
+                "status": "warning",
+                "message": f"Step {step['step_id']}: Fallback to QGIS for {operation} (tool missing in Whitebox)",
+                "icon": "⚠️"
+            }
+        
+        st.session_state.execution_log.append(log_entry)
+        # Rerun to update UI
+        st.experimental_rerun()
+    
+    # Final completion
+    st.session_state.execution_log.append({
+        "timestamp": time.strftime("%H:%M:%S"),
+        "status": "success",
+        "message": f"✅ Workflow completed! Output saved: flood_risk_{workflow['description'].split()[-1].lower()}.tif",
+        "icon": "✅"
+    })
+    st.session_state.execution_complete = True
+    st.experimental_rerun()
+
+# Create main columns
+col1, col2, col3 = st.columns([0.25, 0.45, 0.30], gap="medium")
+
+# Left Column - Query & Control
+with col1:
+    st.markdown("### 📍 Natural Language Query")
+    query = st.text_area(
+        "Describe your geospatial task:",
+        value=st.session_state.query or "Flood risk map for Mumbai using Sentinel-2 data",
+        height=120,
+        placeholder="e.g., Flood risk map for Mumbai using Sentinel-2 data",
+        key="query_input"
+    )
+    
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        run_btn = st.button("▶ Run Workflow", use_container_width=True)
+    with c2:
+        regen_btn = st.button("↻ Regenerate", use_container_width=True)
+    with c3:
+        save_btn = st.button("⬇ Save", use_container_width=True, disabled=True)
+    
+    with st.expander("⚙️ Advanced Options", expanded=False):
+        st.markdown("**Data Sources**")
+        st.checkbox("STAC API", value=True, key="stac_api")
+        st.checkbox("OpenStreetMap", value=True, key="osm_data")
+        st.checkbox("Bhuvan", value=False, key="bhuvan_data")
+        
+        st.markdown("**Execution Mode**")
+        execution_mode = st.radio(
+            "",
+            options=["Auto-select (recommended)", "GDAL+Whitebox only", "QGIS only"],
+            index=0,
+            label_visibility="collapsed"
+        )
+        
+        st.markdown("**Output Format**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.checkbox("GeoTIFF", value=True, key="output_geotiff")
+        with c2:
+            st.checkbox("GeoJSON", value=True, key="output_geojson")
+        with c3:
+            st.checkbox("PDF Report", value=False, key="output_pdf")
+    
+    st.markdown("### ⏱️ Workflow History")
+    history_data = [
+        {"Name": "Flood Mapping - Mumbai", "Date": "2023-12-01", "Status": "✅"},
+        {"Name": "Land Suitability - Bangalore", "Date": "2023-11-25", "Status": "⚠️"},
+        {"Name": "Crop Monitoring - Delhi", "Date": "2023-11-20", "Status": "✅"}
+    ]
+    st.dataframe(pd.DataFrame(history_data), hide_index=True, use_container_width=True)
+
+# Center Column - Execution & Reasoning
+with col2:
+    # Generate workflow if needed
+    if run_btn or regen_btn or not st.session_state.workflow:
+        st.session_state.workflow = generate_workflow(query)
+        st.session_state.reasoning = generate_reasoning(query)
+        st.session_state.execution_started = False
+        st.session_state.execution_complete = False
+    
+    st.markdown("### 🤔 Chain-of-Thought Reasoning")
+    reasoning_card = st.container()
+    with reasoning_card:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        
+        for step in st.session_state.reasoning:
+            st.markdown(f"<div style='margin-bottom:10px;'>{step}</div>", unsafe_allow_html=True)
+        
+        st.markdown('<div style="text-align:right; margin-top:15px;">', unsafe_allow_html=True)
+        st.button("↓ Show More Steps", key="show_more_steps")
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("### ⚙️ Generated Workflow")
+    workflow_card = st.container()
+    with workflow_card:
+        st.markdown('<div class="card card-gdal">', unsafe_allow_html=True)
+        st.json(st.session_state.workflow, expanded=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown("### 📝 Execution Log")
+    log_card = st.container()
+    with log_card:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        
+        if st.session_state.execution_log:
+            for log in st.session_state.execution_log:
+                st.markdown(f"`[{log['timestamp']}]` {log['icon']} {log['message']}")
+        else:
+            st.info("Workflow not executed yet. Click 'Run Workflow' to start.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if run_btn and not st.session_state.execution_started:
+            st.session_state.execution_started = True
+            # Start execution in a separate thread
+            import threading
+            thread = threading.Thread(target=execute_workflow, args=(st.session_state.workflow,))
+            thread.start()
+
+# Right Column - Visualization
+with col3:
+    st.markdown("### 🗺️ Results Visualization")
+    
+    # Create tabs for different visualization options
+    tab1, tab2, tab3 = st.tabs(["Map", "Statistics", "Export"])
+    
+    with tab1:
+        map_card = st.container()
+        with map_card:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            
+            # Layer toggles
+            st.markdown("**Layers**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                risk_toggle = st.toggle("Risk Zones", value=True, key="risk_toggle")
+            with c2:
+                roads_toggle = st.toggle("Roads", value=False, key="roads_toggle")
+            with c3:
+                satellite_toggle = st.toggle("Satellite", value=False, key="satellite_toggle")
+            
+            # Show map
+            if st.session_state.execution_complete:
+                st.markdown("**Flood Risk Map**")
+                st_folium(st.session_state.flood_data[2], width=400, height=300)
+                
+                # Legend
+                st.markdown("**Legend**")
+                st.markdown("""
+                <div style="display:flex; flex-direction:column; gap:5px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="width:20px; height:20px; background-color:#ef4444; border-radius:50%;"></div>
+                        <span>High Risk</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="width:20px; height:20px; background-color:#f59e0b; border-radius:50%;"></div>
+                        <span>Medium Risk</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="width:20px; height:20px; background-color:#22c55e; border-radius:50%;"></div>
+                        <span>Low Risk</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info("Complete workflow execution to view results")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        stats_card = st.container()
+        with stats_card:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            
+            if st.session_state.execution_complete:
+                st.markdown("### 📊 Flood Risk Analysis")
+                
+                # Metrics
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("High Risk Area", "12.8 km²", "18% of total")
+                with col2:
+                    st.metric("Population Affected", "~42,000", "7% of population")
+                
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.metric("Critical Infrastructure", "5 hospitals", "2 schools")
+                with col4:
+                    st.metric("Estimated Damage", "$2.8M USD", "+15% from 2022")
+                
+                # Risk distribution chart
+                st.markdown("**Risk Distribution**")
+                risk_data = pd.DataFrame({
+                    "Risk Level": ["Low", "Medium", "High"],
+                    "Area (km²)": [45.2, 28.7, 12.8]
+                })
+                st.bar_chart(risk_data.set_index("Risk Level"), color="#2563EB")
+            else:
+                st.info("Complete workflow execution to view statistics")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab3:
+        export_card = st.container()
+        with export_card:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            
+            st.markdown("### ⬇ Download Results")
+            
+            # Format selection
+            st.radio(
+                "Select format:",
+                options=["GeoTIFF", "GeoJSON", "PDF Report"],
+                index=0,
+                key="export_format"
+            )
+            
+            # Export button
+            st.button("Download Results", use_container_width=True, disabled=not st.session_state.execution_complete)
+            
+            # Additional options
+            st.markdown("---")
+            st.markdown("**Additional Options**")
+            st.button("📈 Generate Time-Series", use_container_width=True, disabled=not st.session_state.execution_complete)
+            st.button("🔄 Compare Scenarios", use_container_width=True, disabled=not st.session_state.execution_complete)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+
+# Footer section
+st.markdown("""
+<div class="footer">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <strong>Execution Engine:</strong> GDAL 3.8 | Whitebox 2.2 | QGIS 3.34 (fallback)
+        </div>
+        <div>
+            <strong>⚡ Performance:</strong> 28.4s total | 3.2x faster than QGIS-only
+        </div>
+        <div>
+            <strong>Data Sources:</strong> Microsoft Planetary Computer | OpenStreetMap
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
